@@ -2,6 +2,7 @@ services:
   rtsp:
     build: .
     environment:
+      TZ: Europe/Berlin
       # rtsp config
       RTSP_USER: abc
       RTSP_PASS: abc
