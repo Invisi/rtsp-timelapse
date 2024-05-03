@@ -20,7 +20,6 @@ RTSP_PATH = os.environ.get("RTSP_PATH", "stream1")
 
 # interval settings
 INTERVAL_SCREENSHOT_MINUTES = os.environ.get("INTERVAL_SCREENSHOT_MINUTES", 1)
-INTERVAL_TIMELAPSE_HOURS = os.environ.get("INTERVAL_TIMELAPSE_HOURS", 24)
 
 # misc settings
 DATA_PATH = Path(os.environ.get("DATA_PATH", "./data"))
@@ -52,18 +51,17 @@ class SignalHandler:
         pass
 
 
-def generate_filename(
-    is_timelapse: bool = False, timelapse_framerate: int = 24
-) -> Path:
-    """Generate timestamped filename for screenshot or timelapse"""
+def image_filename():
+    dt = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return SCREENSHOT_PATH / f"{dt}.{IMAGE_EXTENSION}"
+
+
+def timelapse_filename(framerate: int = 24, week: bool = False) -> Path:
     dt = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    if is_timelapse:
-        path = TIMELAPSE_PATH / f"{dt}_fps_{timelapse_framerate}.mp4"
-    else:
-        path = SCREENSHOT_PATH / f"{dt}.{IMAGE_EXTENSION}"
-
-    return path
+    if week:
+        return TIMELAPSE_PATH / f"{dt}_fps_{framerate}_week.mp4"
+    return TIMELAPSE_PATH / f"{dt}_fps_{framerate}.mp4"
 
 
 def take_screenshot() -> None:
@@ -78,23 +76,31 @@ def take_screenshot() -> None:
 
     try:
         ffmpeg.input(rtsp_url, loglevel="error", rtsp_transport="tcp").output(
-            str(generate_filename()), vframes=1, timeout=5
+            str(image_filename()), vframes=1, timeout=5
         ).run()
         log.info("took screenshot")
     except ffmpeg.Error:
         log.exception("failed to take screenshot")
 
 
-def generate_timelapse() -> tuple[Path, Path] | None:
+def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
     """Generate 24 fps & 60 fps timelapse from images"""
     log.info("generating timelapses")
 
-    fps_24 = generate_filename(is_timelapse=True, timelapse_framerate=24)
-    fps_60 = generate_filename(is_timelapse=True, timelapse_framerate=60)
+    fps_24 = timelapse_filename(framerate=24, week=week)
+    fps_60 = timelapse_filename(framerate=60, week=week)
+
+    if week:
+        filename_glob = SCREENSHOT_PATH / f"*.{IMAGE_EXTENSION}"
+    else:
+        dt = datetime.datetime.today() - datetime.timedelta(days=1)
+        filename_glob = (
+            SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d')}*.{IMAGE_EXTENSION}"
+        )
 
     try:
         ffmpeg.input(
-            SCREENSHOT_PATH / f"*.{IMAGE_EXTENSION}",
+            filename_glob,
             loglevel="error",
             framerate=24,
             pattern_type="glob",
@@ -108,7 +114,7 @@ def generate_timelapse() -> tuple[Path, Path] | None:
 
     try:
         ffmpeg.input(
-            SCREENSHOT_PATH / f"*.{IMAGE_EXTENSION}",
+            filename_glob,
             loglevel="error",
             framerate=60,
             pattern_type="glob",
@@ -123,41 +129,47 @@ def generate_timelapse() -> tuple[Path, Path] | None:
     return fps_24, fps_60
 
 
-def send_timelapse() -> None:
+def send_timelapse(week: bool = False) -> None:
     """Generate and send timelapse via apprise"""
-    result = generate_timelapse()
+    result = generate_timelapse(week)
     if result is None:
         return
 
     fps_24, fps_60 = result
 
+    if week:
+        title = "Weekly RTSP Timelapse"
+    else:
+        title = "Daily RTSP Timelapse"
+
     if APPRISE_SERVERS:
         log.info("sending notification")
         app = apprise.Apprise(servers=APPRISE_SERVERS)
-        log.info("sending apprise notification")
         app.notify(
-            title="RTSP Timelapse (24 FPS)",
-            body=f"Timelapse generated every {INTERVAL_TIMELAPSE_HOURS} hours",
+            title=f"{title} (24 FPS)",
+            body="",
             attach=apprise.AppriseAttachment(str(fps_24)),
         )
         app.notify(
-            title="RTSP Timelapse (60 FPS)",
-            body=f"Timelapse generated every {INTERVAL_TIMELAPSE_HOURS} hours",
+            title=f"{title} (60 FPS)",
+            body="",
             attach=apprise.AppriseAttachment(str(fps_60)),
         )
 
-    for image in SCREENSHOT_PATH.iterdir():
-        if not image.is_file():
-            continue
+    if week:
+        for image in SCREENSHOT_PATH.iterdir():
+            if not image.is_file():
+                continue
 
-        image.unlink(missing_ok=True)
+            image.unlink(missing_ok=True)
 
-    log.info("cleaned up images")
+        log.info("cleaned up images")
 
 
 def run_schedule() -> None:
     schedule.every(int(INTERVAL_SCREENSHOT_MINUTES)).minutes.do(take_screenshot)
-    schedule.every(int(INTERVAL_TIMELAPSE_HOURS)).hours.do(send_timelapse)
+    schedule.every().day.at("00:00").do(send_timelapse)
+    schedule.every().monday.at("00:00").do(send_timelapse, week=True)
 
     # take initial screenshot to check if everything works as expected
     take_screenshot()

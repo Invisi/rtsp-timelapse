@@ -9,9 +9,8 @@ services:
       # RTSP_PORT: 554
       # RTSP_PATH: stream1
       #
-      # how often to generate screenshots/timelapses
-      INTERVAL_SCREENSHOT_MINUTES: 1
-      INTERVAL_TIMELAPSE_HOURS: 24
+      # how often to take a screenshot
+      INTERVAL_SCREENSHOT_MINUTES: 10
       #
       LOGGING_LEVEL: ERROR  # suppress unnecessary messages
       TIMELAPSE_CRF: 28  # CRF of timelapse videos
