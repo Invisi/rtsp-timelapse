@@ -1,0 +1,27 @@
+services:
+  rtsp:
+    build: .
+    environment:
+      # rtsp config
+      RTSP_USER: abc
+      RTSP_PASS: abc
+      RTSP_HOST: 192.168.1.1
+      # RTSP_PORT: 554
+      # RTSP_PATH: stream1
+      #
+      # how often to generate screenshots/timelapses
+      INTERVAL_SCREENSHOT_MINUTES: 1
+      INTERVAL_TIMELAPSE_HOURS: 24
+      #
+      LOGGING_LEVEL: ERROR  # suppress unnecessary messages
+      TIMELAPSE_CRF: 28  # CRF of timelapse videos
+      #
+      # notification settings, where to send videos once generated
+      # separate by comma or space
+      # https://github.com/caronc/apprise/wiki/config
+      # APPRISE_SERVERS: discord://1234/abc1234
+    volumes:
+      - data:/app/data
+
+volumes:
+  data:

@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "rtsp-timelapse"
+version = "0.1.0"
+description = ""
+authors = ["Yannick Linke <invisi@0x0f.net>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+apprise = "^1.7.6"
+ffmpeg-python = "^0.2.0"
+schedule = "^1.2.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
