@@ -12,6 +12,8 @@ services:
       #
       # how often to take a screenshot
       INTERVAL_SCREENSHOT_MINUTES: 10
+      # when to generate timelapse
+      TIMELAPSE_GENERATION_TIME: 14:00
       #
       LOGGING_LEVEL: ERROR  # suppress unnecessary messages
       TIMELAPSE_CRF: 28  # CRF of timelapse videos

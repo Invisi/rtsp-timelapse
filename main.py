@@ -18,8 +18,9 @@ RTSP_HOST = os.environ.get("RTSP_HOST")
 RTSP_PORT = os.environ.get("RTSP_PORT", 554)
 RTSP_PATH = os.environ.get("RTSP_PATH", "stream1")
 
-# interval settings
+# job settings
 INTERVAL_SCREENSHOT_MINUTES = os.environ.get("INTERVAL_SCREENSHOT_MINUTES", 1)
+TIMELAPSE_GENERATION_TIME = os.environ.get("TIMELAPSE_GENERATION_TIME", "00:00")
 
 # misc settings
 DATA_PATH = Path(os.environ.get("DATA_PATH", "./data"))
@@ -51,8 +52,12 @@ class SignalHandler:
 
 
 def image_filename():
-    dt = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return SCREENSHOT_PATH / f"{dt}.jpg"
+    dt = datetime.datetime.now()
+    if TIMELAPSE_GENERATION_TIME != "00:00":
+        hours, minutes = TIMELAPSE_GENERATION_TIME.split(":")
+        dt = dt - datetime.timedelta(hours=int(hours), minutes=int(minutes))
+
+    return SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d_%H-%M-%S')}.jpg"
 
 
 def timelapse_filename(framerate: int = 24, week: bool = False) -> Path:
@@ -102,7 +107,6 @@ def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
     try:
         ffmpeg.input(
             filename_glob,
-            loglevel="error",
             framerate=24,
             pattern_type="glob",
         ).output(
@@ -116,7 +120,6 @@ def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
     try:
         ffmpeg.input(
             filename_glob,
-            loglevel="error",
             framerate=60,
             pattern_type="glob",
         ).output(
@@ -169,8 +172,8 @@ def send_timelapse(week: bool = False) -> None:
 
 def run_schedule() -> None:
     schedule.every(int(INTERVAL_SCREENSHOT_MINUTES)).minutes.do(take_screenshot)
-    schedule.every().day.at("00:00").do(send_timelapse)
-    schedule.every().monday.at("00:00").do(send_timelapse, week=True)
+    schedule.every().day.at(TIMELAPSE_GENERATION_TIME).do(send_timelapse)
+    schedule.every().monday.at(TIMELAPSE_GENERATION_TIME).do(send_timelapse, week=True)
 
     # take initial screenshot to check if everything works as expected
     take_screenshot()
