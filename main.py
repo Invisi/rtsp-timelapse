@@ -26,7 +26,6 @@ DATA_PATH = Path(os.environ.get("DATA_PATH", "./data"))
 LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "INFO")
 TIMELAPSE_CRF = os.environ.get("TIMELAPSE_CRF", 28)
 APPRISE_SERVERS = os.environ.get("APPRISE_SERVERS", "")
-IMAGE_EXTENSION = os.environ.get("IMAGE_EXTENSION", "jpg")
 
 # image & video paths
 TIMELAPSE_PATH = DATA_PATH / "timelapses"
@@ -53,7 +52,7 @@ class SignalHandler:
 
 def image_filename():
     dt = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return SCREENSHOT_PATH / f"{dt}.{IMAGE_EXTENSION}"
+    return SCREENSHOT_PATH / f"{dt}.jpg"
 
 
 def timelapse_filename(framerate: int = 24, week: bool = False) -> Path:
@@ -76,7 +75,11 @@ def take_screenshot() -> None:
 
     try:
         ffmpeg.input(rtsp_url, loglevel="error", rtsp_transport="tcp").output(
-            str(image_filename()), vframes=1, timeout=5
+            str(image_filename()),
+            vframes=1,
+            timeout=5,
+            qmin=1,
+            qscale=1,
         ).run()
         log.info("took screenshot")
     except ffmpeg.Error:
@@ -91,12 +94,10 @@ def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
     fps_60 = timelapse_filename(framerate=60, week=week)
 
     if week:
-        filename_glob = SCREENSHOT_PATH / f"*.{IMAGE_EXTENSION}"
+        filename_glob = SCREENSHOT_PATH / "*.jpg"
     else:
         dt = datetime.datetime.today() - datetime.timedelta(days=1)
-        filename_glob = (
-            SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d')}*.{IMAGE_EXTENSION}"
-        )
+        filename_glob = SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d')}*.jpg"
 
     try:
         ffmpeg.input(
