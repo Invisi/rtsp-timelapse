@@ -4,33 +4,63 @@ import os
 import signal
 import time
 from pathlib import Path
-from typing import Self
+from types import FrameType, TracebackType
+from typing import Annotated, Self
 
 import apprise
 import ffmpeg
 import schedule
+from pydantic import Field, UrlConstraints, model_validator
+from pydantic_settings import BaseSettings
+from pydantic_core import Url
+
+RtspUrl = Annotated[Url, UrlConstraints(allowed_schemes=["rtsp"])]
 
 
-# rtsp settings
-RTSP_USER = os.environ.get("RTSP_USER", "")
-RTSP_PASS = os.environ.get("RTSP_PASS", "")
-RTSP_HOST = os.environ.get("RTSP_HOST")
-RTSP_PORT = os.environ.get("RTSP_PORT", 554)
-RTSP_PATH = os.environ.get("RTSP_PATH", "stream1")
+class Settings(BaseSettings):
+    rtsp_url: RtspUrl
 
-# job settings
-INTERVAL_SCREENSHOT_MINUTES = os.environ.get("INTERVAL_SCREENSHOT_MINUTES", 1)
-TIMELAPSE_GENERATION_TIME = os.environ.get("TIMELAPSE_GENERATION_TIME", "00:00")
+    # job settings
+    screenshot_interval: int = Field(5, alias="INTERVAL_SCREENSHOT_MINUTES")
+    timelapse_generation_time: datetime.time = datetime.time(0, 0)
+    timelapse_crf: int = 28
 
-# misc settings
-DATA_PATH = Path(os.environ.get("DATA_PATH", "./data"))
-LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "INFO")
-TIMELAPSE_CRF = os.environ.get("TIMELAPSE_CRF", 28)
-APPRISE_SERVERS = os.environ.get("APPRISE_SERVERS", "")
+    # time range to skip generation of a screenshot
+    skip_time_start: datetime.time | None = None
+    skip_time_end: datetime.time | None = None
+
+    data_path: Path = Path("./data")
+    logging_level: str = "INFO"
+
+    apprise_servers: str | None = None
+
+    @model_validator(mode="after")
+    def check_skip_time_range(self) -> Self:
+        if (
+            self.skip_time_start is None
+            and self.skip_time_end is not None
+            or self.skip_time_end is None
+            and self.skip_time_start is not None
+        ):
+            raise ValueError(
+                "Both start and end have to be defined to properly skip time"
+            )
+
+        if (
+            self.skip_time_start is not None
+            and self.skip_time_end is not None
+            and self.skip_time_start > self.skip_time_end
+        ):
+            raise ValueError("Start cannot be after end")
+
+        return self
+
+
+settings = Settings()
 
 # image & video paths
-TIMELAPSE_PATH = DATA_PATH / "timelapses"
-SCREENSHOT_PATH = DATA_PATH / "screenshots"
+TIMELAPSE_PATH = settings.data_path / "timelapses"
+SCREENSHOT_PATH = settings.data_path / "screenshots"
 TIMELAPSE_PATH.mkdir(parents=True, exist_ok=True)
 SCREENSHOT_PATH.mkdir(parents=True, exist_ok=True)
 
@@ -41,46 +71,57 @@ class SignalHandler:
     def __enter__(self) -> Self:
         self.stop = False
 
-        def handler(_signum, _frame):
+        def handler(_signum: int, _frame: FrameType | None) -> None:
             self.stop = True
 
         signal.signal(signal.SIGTERM, handler)
         return self
 
-    def __exit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+    def __exit__(
+        self,
+        _exc_type: type,
+        _exc_val: Exception,
+        _exc_tb: TracebackType,
+    ) -> None:
         pass
 
 
-def image_filename():
+def image_filename() -> str:
     dt = datetime.datetime.now()
-    if TIMELAPSE_GENERATION_TIME != "00:00":
-        hours, minutes = TIMELAPSE_GENERATION_TIME.split(":")
-        dt = dt - datetime.timedelta(hours=int(hours), minutes=int(minutes))
+    if settings.timelapse_generation_time != datetime.time(0, 0):
+        dt = dt - datetime.timedelta(
+            hours=settings.timelapse_generation_time.hour,
+            minutes=settings.timelapse_generation_time.minute,
+        )
 
-    return SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d_%H-%M-%S')}.jpg"
+    return str(SCREENSHOT_PATH / f"{dt.strftime('%Y-%m-%d_%H-%M-%S')}.jpg")
 
 
-def timelapse_filename(framerate: int = 24, week: bool = False) -> Path:
+def timelapse_filename(framerate: int = 24, week: bool = False) -> str:
     dt = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     if week:
-        return TIMELAPSE_PATH / f"{dt}_fps_{framerate}_week.mp4"
-    return TIMELAPSE_PATH / f"{dt}_fps_{framerate}.mp4"
+        return str(TIMELAPSE_PATH / f"{dt}_fps_{framerate}_week.mp4")
+    return str(TIMELAPSE_PATH / f"{dt}_fps_{framerate}.mp4")
 
 
 def take_screenshot() -> None:
     """Take screenshot of RTSP stream and save it"""
-    rtsp_path = RTSP_PATH.lstrip("/")
-    if RTSP_USER and RTSP_PASS:
-        rtsp_url = f"rtsp://{RTSP_USER}:{RTSP_PASS}@{RTSP_HOST}:{RTSP_PORT}/{rtsp_path}"
-    elif RTSP_USER:
-        rtsp_url = f"rtsp://{RTSP_USER}@{RTSP_HOST:{RTSP_PORT}}/{rtsp_path}"
-    else:
-        rtsp_url = f"rtsp://{RTSP_HOST}:{RTSP_PORT}/{rtsp_path}"
+
+    now = datetime.datetime.now().time()
+    if (
+        settings.skip_time_start is not None
+        and settings.skip_time_end is not None
+        and settings.skip_time_start <= now <= settings.skip_time_end
+    ):
+        log.info("skipping screenshot")
+        return
 
     try:
-        ffmpeg.input(rtsp_url, loglevel="error", rtsp_transport="tcp").output(
-            str(image_filename()),
+        ffmpeg.input(
+            str(settings.rtsp_url), loglevel="error", rtsp_transport="tcp"
+        ).output(
+            image_filename(),
             vframes=1,
             timeout=5,
             qmin=1,
@@ -91,7 +132,7 @@ def take_screenshot() -> None:
         log.exception("failed to take screenshot")
 
 
-def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
+def generate_timelapse(week: bool) -> tuple[str, str] | None:
     """Generate 24 fps & 60 fps timelapse from images"""
     log.info("generating timelapses")
 
@@ -110,8 +151,8 @@ def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
             framerate=24,
             pattern_type="glob",
         ).output(
-            str(fps_24),
-            crf=TIMELAPSE_CRF,
+            fps_24,
+            crf=settings.timelapse_crf,
         ).run()
     except ffmpeg.Error:
         log.exception("failed to generate 24fps timelapse")
@@ -123,8 +164,8 @@ def generate_timelapse(week: bool) -> tuple[Path, Path] | None:
             framerate=60,
             pattern_type="glob",
         ).output(
-            str(fps_60),
-            crf=TIMELAPSE_CRF,
+            fps_60,
+            crf=settings.timelapse_crf,
         ).run()
     except ffmpeg.Error:
         log.exception("failed to generate 60fps timelapse")
@@ -146,18 +187,18 @@ def send_timelapse(week: bool = False) -> None:
     else:
         title = "Daily RTSP Timelapse"
 
-    if APPRISE_SERVERS:
+    if settings.apprise_servers:
         log.info("sending notification")
-        app = apprise.Apprise(servers=APPRISE_SERVERS)
+        app = apprise.Apprise(servers=settings.apprise_servers)
         app.notify(
             title=f"{title} (24 FPS)",
             body="",
-            attach=apprise.AppriseAttachment(str(fps_24)),
+            attach=apprise.AppriseAttachment(fps_24),
         )
         app.notify(
             title=f"{title} (60 FPS)",
             body="",
-            attach=apprise.AppriseAttachment(str(fps_60)),
+            attach=apprise.AppriseAttachment(fps_60),
         )
 
     if week:
@@ -171,9 +212,11 @@ def send_timelapse(week: bool = False) -> None:
 
 
 def run_schedule() -> None:
-    schedule.every(int(INTERVAL_SCREENSHOT_MINUTES)).minutes.do(take_screenshot)
-    schedule.every().day.at(TIMELAPSE_GENERATION_TIME).do(send_timelapse)
-    schedule.every().monday.at(TIMELAPSE_GENERATION_TIME).do(send_timelapse, week=True)
+    schedule.every(settings.screenshot_interval).minutes.do(take_screenshot)
+    schedule.every().day.at(str(settings.timelapse_generation_time)).do(send_timelapse)
+    schedule.every().monday.at(str(settings.timelapse_generation_time)).do(
+        send_timelapse, week=True
+    )
 
     # take initial screenshot to check if everything works as expected
     take_screenshot()
@@ -191,7 +234,7 @@ def run_schedule() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.getLevelName(LOGGING_LEVEL),
+        level=logging.getLevelName(settings.logging_level),
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler()],

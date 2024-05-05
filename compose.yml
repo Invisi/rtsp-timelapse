@@ -4,16 +4,15 @@ services:
     environment:
       TZ: Europe/Berlin
       # rtsp config
-      RTSP_USER: abc
-      RTSP_PASS: abc
-      RTSP_HOST: 192.168.1.1
-      # RTSP_PORT: 554
-      # RTSP_PATH: stream1
+      RTSP_URL: rtsp://abc:abc@192.168.1.1:554/stream1
       #
       # how often to take a screenshot
       INTERVAL_SCREENSHOT_MINUTES: 10
       # when to generate timelapse
       TIMELAPSE_GENERATION_TIME: 14:00
+      # skip time range, e.g. when it's night
+      SKIP_TIME_START: 14:30
+      SKIP_TIME_END: 19:30
       #
       LOGGING_LEVEL: ERROR  # suppress unnecessary messages
       TIMELAPSE_CRF: 28  # CRF of timelapse videos
